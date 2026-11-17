@@ -352,11 +352,14 @@ function decodeText(buffer) {
   catch (error) { return new TextDecoder("windows-1252").decode(buffer); }
 }
 
-// Prose wrapped at a fixed width: every line but the last is about as long as the longest.
+// Prose wrapped at a fixed width: every line but the last is about as long as the longest,
+// and most lines stop mid-sentence. Lines that each end a sentence are a list, not wrapped prose.
 function isHardWrapped(lines) {
   if (lines.length < 2) return false;
+  const body = lines.slice(0, -1);
   const longest = Math.max(...lines.map((line) => line.length));
-  return longest >= 50 && lines.slice(0, -1).every((line) => line.length >= longest * 0.65);
+  const complete = body.filter((line) => SENTENCE_END.test(line)).length;
+  return longest >= 50 && complete < body.length / 2 && body.every((line) => line.length >= longest * 0.65);
 }
 
 async function translateTxt(file, ctx) {
@@ -486,10 +489,17 @@ async function buildDocx(paragraphs) {
 
 async function translatePdf(file, ctx) {
   pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-  const pdf = await pdfjsLib.getDocument({
-    data: await file.arrayBuffer(),
-    cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/", cMapPacked: true,
-  }).promise;
+  let pdf;
+  try {
+    pdf = await pdfjsLib.getDocument({
+      data: await file.arrayBuffer(),
+      cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/", cMapPacked: true,
+    }).promise;
+  } catch (error) {
+    throw new Error(error.name === "PasswordException"
+      ? "PDF này có mật khẩu. Hãy gỡ mật khẩu rồi thử lại."
+      : "File PDF bị hỏng hoặc không đọc được.");
+  }
   const pages = [];
   for (let number = 1; number <= pdf.numPages; number++) {
     if (ctx.signal.aborted) throw abortError();
@@ -587,6 +597,26 @@ function parseXml(text, name) {
   return doc;
 }
 
+const XML_ENTITIES = new Set(["amp", "lt", "gt", "quot", "apos"]);
+
+function parseChapter(text) {
+  const parser = new DOMParser();
+  let doc = parser.parseFromString(text, "application/xhtml+xml");
+  if (!doc.querySelector("parsererror")) return doc;
+  // Usually the only problem is an HTML entity such as &nbsp;, which XML does not know.
+  const decoder = document.createElement("textarea");
+  const numeric = text.replace(/&([a-zA-Z][a-zA-Z0-9]*);/g, (entity, name) => {
+    if (XML_ENTITIES.has(name)) return entity;
+    decoder.innerHTML = entity;
+    return decoder.value === entity ? entity
+      : Array.from(decoder.value, (ch) => "&#" + ch.codePointAt(0) + ";").join("");
+  });
+  doc = parser.parseFromString(numeric, "application/xhtml+xml");
+  if (!doc.querySelector("parsererror")) return doc;
+  // Last resort for broken markup. The HTML parser is lenient but misreads <a id="x"/>.
+  return parser.parseFromString(text, "text/html");
+}
+
 // Browsers differ on whether the serializer writes the XML declaration, so drop any and add ours.
 const serializeXml = (doc) => '<?xml version="1.0" encoding="utf-8"?>\n' +
   new XMLSerializer().serializeToString(doc).replace(/^\s*<\?xml[^>]*\?>\s*/, "");
@@ -626,8 +656,7 @@ async function translateEpub(file, ctx) {
   for (const path of paths) {
     const text = await read(path);
     if (text === null) continue;
-    let doc = new DOMParser().parseFromString(text, "application/xhtml+xml");
-    if (doc.querySelector("parsererror")) doc = new DOMParser().parseFromString(text, "text/html");  // sloppy markup
+    const doc = parseChapter(text);
     const before = slots.length;
     const title = doc.querySelector("head > title");
     if (title) textSlots(title, slots);
