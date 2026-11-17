@@ -12,6 +12,12 @@
       "runtimeExecutable": ".venv/bin/python",
       "runtimeArgs": ["main.py", "--web", "--port", "8001", "--dry-run"],
       "port": 8001
+    },
+    {
+      "name": "book-translator-static",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["-m", "http.server", "8002", "--directory", "docs"],
+      "port": 8002
     }
   ]
 }
