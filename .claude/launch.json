@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "book-translator",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["main.py", "--web", "--port", "8000"],
+      "port": 8000
+    },
+    {
+      "name": "book-translator-demo",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["main.py", "--web", "--port", "8001", "--dry-run"],
+      "port": 8001
+    }
+  ]
+}
